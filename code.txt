@@ -1,0 +1,1136 @@
+#!/usr/bin/env python3
+import tkinter as tk
+from tkinter import ttk, messagebox, simpledialog
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import networkx as nx
+import matplotlib.pyplot as plt
+import random
+import numpy as np
+
+def create_random_graph_welsh_powell(num_nodes, probability):
+    """Generates a random undirected graph with a specified number of nodes and probability."""
+    G = nx.Graph()
+    nodes = [f"X{i}" for i in range(num_nodes)]
+    G.add_nodes_from(nodes)
+
+    for i in range(num_nodes):
+        for j in range(i + 1, num_nodes):
+            if random.random() < probability:
+                G.add_edge(nodes[i], nodes[j])
+
+    return G
+
+def welsh_powell_coloring(graph):
+    """Apply the Welsh-Powell algorithm to color the graph."""
+    nodes_sorted = sorted(graph.degree, key=lambda x: x[1], reverse=True)  # Sort nodes by degree
+    colors = {}
+    available_colors = set(range(len(graph.nodes)))  # Set of all possible colors
+
+    for node, _ in nodes_sorted:
+        # Get colors of all neighbors
+        neighbor_colors = {colors[neighbor] for neighbor in graph.neighbors(node) if neighbor in colors}
+        # Assign the smallest available color not used by neighbors
+        for color in available_colors:
+            if color not in neighbor_colors:
+                colors[node] = color
+                break
+    return colors
+
+def display_graph_welsh_powell(canvas_frame, G, node_colors=None):
+    """Displays the graph in a Tkinter canvas for Welsh-Powell algorithm."""
+    for widget in canvas_frame.winfo_children():
+        widget.destroy()
+
+    fig, ax = plt.subplots(figsize=(5, 4))
+    pos = nx.spring_layout(G)
+
+    if node_colors:
+        # Create a color list in the same order as the nodes
+        color_list = [node_colors.get(node, 'lightblue') for node in G.nodes()]
+        nx.draw(G, pos, with_labels=True, node_color=color_list,
+                node_size=700, font_size=10, ax=ax)
+    else:
+        nx.draw(G, pos, with_labels=True, node_color='lightblue',
+                node_size=700, font_size=10, ax=ax)
+
+    canvas = FigureCanvasTkAgg(fig, master=canvas_frame)
+    canvas_widget = canvas.get_tk_widget()
+    canvas_widget.pack(fill=tk.BOTH, expand=True)
+    canvas.draw()
+    plt.close(fig)
+
+def display_graph(canvas_frame, G, tree_edges=None, flow_dict=None, source=None, target=None, flow_value=None, min_cut=None, shortest_path=None):
+    """Displays the graph in a Tkinter canvas for other algorithms."""
+    fig, ax = plt.subplots(figsize=(5, 4))
+    pos = nx.spring_layout(G)
+
+    edge_colors = ['gray'] * len(G.edges)
+    if flow_dict is not None:
+        edge_labels = {edge: f"{flow_dict[edge[0]][edge[1]]}/{G[edge[0]][edge[1]]['capacity']}" for edge in G.edges}
+        edge_colors = ['red' if (u, v) in min_cut or (v, u) in min_cut else 'gray' for u, v in G.edges()]
+    elif tree_edges is not None:
+        edge_colors = ['red' if edge in tree_edges or (edge[1], edge[0]) in tree_edges else 'gray' for edge in G.edges()]
+        edge_labels = nx.get_edge_attributes(G, 'weight')
+    else:
+        edge_labels = nx.get_edge_attributes(G, 'weight')
+
+    node_colors = ['lightblue'] * len(G.nodes)
+    if source is not None and target is not None:
+        node_colors = ['lightgreen' if n in {source, target} else 'lightblue' for n in G.nodes()]
+
+    nx.draw(G, pos, with_labels=True, node_color=node_colors, edge_color=edge_colors, node_size=700, font_size=10, ax=ax)
+    nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, ax=ax)
+
+    if shortest_path:
+        path_edges = list(zip(shortest_path, shortest_path[1:]))
+        nx.draw_networkx_edges(G, pos, edgelist=path_edges, edge_color='red', width=2, ax=ax)
+
+    for widget in canvas_frame.winfo_children():
+        widget.destroy()
+    canvas = FigureCanvasTkAgg(fig, master=canvas_frame)
+    canvas_widget = canvas.get_tk_widget()
+    canvas_widget.pack(fill=tk.BOTH, expand=True)
+    canvas.draw()
+    plt.close(fig)
+
+def display_transport_graph(canvas_frame, capacites, demandes, allocation, couts):
+    """Displays the transportation problem graph in a Tkinter canvas."""
+    for widget in canvas_frame.winfo_children():
+        widget.destroy()
+
+    G = nx.Graph()
+    usines = [f"U{i}" for i in range(len(capacites))]
+    magasins = [f"M{j}" for j in range(len(demandes))]
+
+    # Add nodes
+    G.add_nodes_from(usines, bipartite=0)
+    G.add_nodes_from(magasins, bipartite=1)
+
+    # Add edges with allocation as weight
+    for i, usine in enumerate(usines):
+        for j, magasin in enumerate(magasins):
+            if allocation[i, j] > 0:
+                G.add_edge(usine, magasin, weight=allocation[i, j], cost=couts[i, j])
+
+    # Create positions for bipartite layout
+    pos = {}
+    pos.update((n, (1, i)) for i, n in enumerate(usines))
+    pos.update((n, (2, j)) for j, n in enumerate(magasins))
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+    nx.draw(G, pos, with_labels=True, node_color='lightblue', node_size=700, font_size=10, ax=ax)
+    edge_labels = {(u, v): f"{d['weight']}/{d['cost']}" for u, v, d in G.edges(data=True)}
+    nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, ax=ax)
+
+    canvas = FigureCanvasTkAgg(fig, master=canvas_frame)
+    canvas_widget = canvas.get_tk_widget()
+    canvas_widget.pack(fill=tk.BOTH, expand=True)
+    canvas.draw()
+    plt.close(fig)
+
+# GUI Classes
+class WelshPowellGUI:
+    def __init__(self, root):
+        self.root = root
+        self.graph = None
+
+        for widget in self.root.winfo_children():
+            widget.destroy()
+
+        self.create_base_layout()
+
+        tk.Label(root, text="Welsh-Powell Algorithm", font=("Poppins", 20, "bold"), pady=20).pack()
+
+        control_frame = tk.Frame(root, pady=10)
+        control_frame.pack(side=tk.LEFT, fill=tk.Y)
+
+        self.canvas_frame = tk.Frame(root)
+        self.canvas_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+
+        tk.Label(control_frame, text="Number of Nodes:").pack()
+        self.num_nodes_entry = tk.Entry(control_frame)
+        self.num_nodes_entry.pack()
+
+        tk.Label(control_frame, text="Probability:").pack()
+        self.probability_entry = tk.Entry(control_frame)
+        self.probability_entry.pack()
+
+        tk.Button(control_frame, text="Create Random Graph", command=self.create_graph).pack(pady=5)
+        tk.Button(control_frame, text="Apply Welsh-Powell", command=self.apply_welsh_powell).pack(pady=5)
+
+        self.result_text = tk.Text(control_frame, height=10, width=30)
+        self.result_text.pack(pady=5)
+
+        tk.Button(control_frame, text="Back to Main Menu", command=lambda: AlgorithmApp(self.root).main_menu()).pack(pady=10)
+
+    def create_base_layout(self):
+        # Create a frame for the name and logo
+        name_logo_frame = tk.Frame(self.root)
+        name_logo_frame.pack(side=tk.TOP, fill=tk.X)
+
+        # Add your name on the left
+        name_label = tk.Label(name_logo_frame, text="Elèves ingenieurs : \nYouness KOSSARA\nMohamed Anas RAFI\n\nEncadré par:\nDr.El MKHALET Mouna", font=("Poppins", 22, "bold"), padx=20)
+        name_label.pack(side=tk.LEFT, anchor=tk.W)
+
+        # Add a logo on the right (you can replace 'logo.png' with your actual logo file path)
+        logo_path = "/Users/anas/Documents/python_env/python_env/logo-emsi.png"  # Replace with the actual path to your logo
+        try:
+            logo_image = tk.PhotoImage(file=logo_path)
+            # Resize the image
+            logo_image = logo_image.subsample(2, 2)  # Adjust the subsample values to make the image smaller
+            logo_label = tk.Label(name_logo_frame, image=logo_image)
+            logo_label.image = logo_image  # Keep a reference to avoid garbage collection
+            logo_label.pack(side=tk.RIGHT, anchor=tk.E, padx=10, pady=10)
+        except tk.TclError:
+            print("Logo image not found.")
+
+        # Create a footer frame
+        footer_frame = tk.Frame(self.root, bg="gray", height=30)
+        footer_frame.pack(side=tk.BOTTOM, fill=tk.X)
+
+        # Add footer text
+        footer_label = tk.Label(footer_frame, text="© 2024 EMSI - all rights preserved", bg="gray", fg="white")
+        footer_label.pack(pady=5)
+
+    def create_graph(self):
+        try:
+            num_nodes = int(self.num_nodes_entry.get())
+            probability = float(self.probability_entry.get())
+            self.graph = create_random_graph_welsh_powell(num_nodes, probability)
+            self.result_text.delete(1.0, tk.END)
+            self.result_text.insert(tk.END, f"Graph with {num_nodes} nodes created.")
+            display_graph_welsh_powell(self.canvas_frame, self.graph)
+        except ValueError:
+            messagebox.showerror("Error", "Please enter a valid number of nodes and probability.")
+
+    def apply_welsh_powell(self):
+        if not self.graph:
+            messagebox.showerror("Error", "No graph created.")
+            return
+
+        colors = welsh_powell_coloring(self.graph)
+        chromatic_number = max(colors.values()) + 1
+
+        # Use a discrete color map for better visibility
+        distinct_colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
+                           '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
+        # If we need more colors than available, cycle through them
+        color_map = {i: distinct_colors[i % len(distinct_colors)] for i in range(chromatic_number)}
+
+        # Map node colors
+        node_colors = {node: color_map[color] for node, color in colors.items()}
+
+        self.result_text.delete(1.0, tk.END)
+        self.result_text.insert(tk.END, f"Chromatic Number: {chromatic_number}\n")
+        for node, color in colors.items():
+            self.result_text.insert(tk.END, f"Node {node}: Color {color}\n")
+
+        display_graph_welsh_powell(self.canvas_frame, self.graph, node_colors=node_colors)
+
+# Bellman-Ford Algorithm Functions
+def create_random_graph_bellman(num_nodes):
+    G = nx.DiGraph()
+    nodes = [f"X{i}" for i in range(num_nodes)]
+    G.add_nodes_from(nodes)
+
+    for i in range(num_nodes):
+        for j in range(num_nodes):
+            if i != j and random.choice([True, False]):
+                weight = random.randint(1, 100)
+                G.add_edge(nodes[i], nodes[j], weight=weight)
+
+    return G
+
+def bellman_ford_shortest_path(G, start_node, end_node):
+    try:
+        path_length, path = nx.single_source_bellman_ford(G, source=start_node, target=end_node)
+        return path, path_length
+    except nx.NetworkXUnbounded:
+        messagebox.showerror("Error", "Graph contains a negative weight cycle")
+        return None, float('inf')
+    except nx.NetworkXNoPath:
+        messagebox.showwarning("Warning", f"No path found between {start_node} and {end_node}")
+        return None, float('inf')
+
+# Dijkstra Algorithm Functions
+def create_random_graph_dijkstra(num_nodes):
+    G = nx.Graph()
+    nodes = [f"X{i}" for i in range(num_nodes)]
+    G.add_nodes_from(nodes)
+
+    for i in range(num_nodes):
+        for j in range(i + 1, num_nodes):
+            if random.choice([True, False]):
+                weight = random.randint(1, 100)
+                G.add_edge(nodes[i], nodes[j], weight=weight)
+
+    return G
+
+def dijkstra_shortest_path(G, start_node, end_node):
+    try:
+        shortest_path = nx.dijkstra_path(G, source=start_node, target=end_node)
+        path_length = nx.dijkstra_path_length(G, source=start_node, target=end_node)
+        return shortest_path, path_length
+    except nx.NetworkXNoPath:
+        messagebox.showwarning("Warning", f"No path found between {start_node} and {end_node}")
+        return None, float('inf')
+
+# Ford-Fulkerson Algorithm Functions
+def create_random_graph_ford_fulkerson(num_nodes):
+    G = nx.DiGraph()
+    for i in range(num_nodes):
+        for j in range(num_nodes):
+            if i != j and random.choice([True, False]):
+                capacity = random.randint(1, 20)
+                G.add_edge(i, j, capacity=capacity)
+    return G
+
+def ford_fulkerson(G, source, target):
+    flow_value, flow_dict = nx.maximum_flow(G, source, target)
+    _, min_cut_edges = nx.minimum_cut(G, source, target)
+    return flow_value, flow_dict, list(min_cut_edges)
+
+# Kruskal's Algorithm Functions
+def create_random_graph_kruskal(num_nodes):
+    G = nx.Graph()
+    nodes = [f"X{i}" for i in range(num_nodes)]
+    G.add_nodes_from(nodes)
+
+    for i in range(num_nodes):
+        for j in range(i + 1, num_nodes):
+            if random.choice([True, False]):
+                weight = random.randint(1, 100)
+                G.add_edge(nodes[i], nodes[j], weight=weight)
+
+    return G
+
+def minimum_spanning_tree(G):
+    mst = nx.minimum_spanning_tree(G, algorithm="kruskal")
+    return list(mst.edges)
+
+# Transportation Problem Functions
+def init_transport():
+    print("=== Problème de transport ===")
+
+    # Demander à l'utilisateur s'il veut entrer les données manuellement ou les générer
+    choix = messagebox.askyesno("Choix", "Souhaitez-vous entrer les données manuellement?")
+
+    if choix:
+        # Saisie du nombre d'usines et de magasins
+        num_usines = simpledialog.askinteger("Input", "Entrez le nombre d'usines :")
+        num_magasins = simpledialog.askinteger("Input", "Entrez le nombre de magasins :")
+
+        # Saisie des capacités des usines
+        capacites = np.array([simpledialog.askinteger("Input", f"Capacité de l'usine {i+1} :") for i in range(num_usines)])
+
+        # Saisie des demandes des magasins
+        demandes = np.array([simpledialog.askinteger("Input", f"Demande du magasin {j+1} :") for j in range(num_magasins)])
+
+        # Saisie des coûts unitaires de transport
+        couts = np.zeros((num_usines, num_magasins))
+        for i in range(num_usines):
+            for j in range(num_magasins):
+                couts[i, j] = simpledialog.askfloat("Input", f"Coût de l'usine {i+1} au magasin {j+1} :")
+
+    else:
+        # Génération aléatoire des données
+        num_usines = simpledialog.askinteger("Input", "Entrez le nombre d'usines :")
+        num_magasins = simpledialog.askinteger("Input", "Entrez le nombre de magasins :")
+
+        # Créer des données aléatoires pour les capacités et les demandes
+        capacites = np.random.randint(10, 50, size=num_usines)
+        demandes = np.random.randint(10, 50, size=num_magasins)
+
+        # Créer des coûts aléatoires
+        couts = np.random.randint(1, 20, size=(num_usines, num_magasins)).astype(float)
+
+    # Ajuster les capacités et les demandes pour être équilibrés
+    total_capacites = np.sum(capacites)
+    total_demandes = np.sum(demandes)
+
+    if total_capacites > total_demandes:
+        demandes[-1] += total_capacites - total_demandes
+    elif total_capacites < total_demandes:
+        capacites[-1] += total_demandes - total_capacites
+
+    # Afficher les données
+    print("\nTableau des coûts unitaires :")
+    print(couts)
+    print("\nCapacités des usines :", capacites)
+    print("Demandes des magasins :", demandes)
+
+    return capacites, demandes, couts
+
+# Algorithme du Nord-Ouest
+def nord_ouest(capacites, demandes):
+    # Créer un tableau pour stocker l'allocation
+    allocation = np.zeros((len(capacites), len(demandes)), dtype=int)
+    i, j = 0, 0
+
+    print("\n=== Solution par la méthode du Nord-Ouest ===")
+
+    # Répartir les produits jusqu'à ce que toutes les demandes soient satisfaites
+    while i < len(capacites) and j < len(demandes):
+        quantite = min(capacites[i], demandes[j])
+        allocation[i][j] = quantite
+
+        # Réduire les capacités et les demandes
+        capacites[i] -= quantite
+        demandes[j] -= quantite
+
+        # Passer à la prochaine usine ou magasin si l'un est épuisé
+        if capacites[i] == 0:
+            i += 1
+        elif demandes[j] == 0:
+            j += 1
+
+    return allocation
+
+# Algorithme du moindre coût
+def moindre_cout(capacites, demandes, couts):
+    allocation = np.zeros((len(capacites), len(demandes)), dtype=int)
+    couts_copy = couts.copy()
+
+    print("\n=== Solution par la méthode du Moindre Coût ===")
+
+    while np.sum(capacites) > 0 and np.sum(demandes) > 0:
+        # Trouver l'indice du coût minimum
+        i, j = np.unravel_index(np.argmin(couts_copy), couts_copy.shape)
+
+        # Allouer autant que possible
+        quantite = min(capacites[i], demandes[j])
+        allocation[i][j] = quantite
+
+        # Mettre à jour les capacités et les demandes
+        capacites[i] -= quantite
+        demandes[j] -= quantite
+
+        # Rendre les cellules inutilisables si épuisées
+        if capacites[i] == 0:
+            couts_copy[i, :] = float('inf')
+        if demandes[j] == 0:
+            couts_copy[:, j] = float('inf')
+
+    return allocation
+
+# Algorithme de la pierre de touche (Stepping Stone Algorithm)
+def stepping_stone(couts, allocation):
+    print("\n=== Optimisation par l'algorithme de Stepping Stone ===")
+
+    num_rows, num_cols = allocation.shape
+    u = [None] * num_rows
+    v = [None] * num_cols
+    u[0] = 0  # Fixer u1 = 0
+
+    # Calculer les potentiels u et v
+    for _ in range(num_rows + num_cols):
+        for i in range(num_rows):
+            for j in range(num_cols):
+                if allocation[i, j] > 0:
+                    if u[i] is not None and v[j] is None:
+                        v[j] = couts[i, j] - u[i]
+                    elif v[j] is not None and u[i] is None:
+                        u[i] = couts[i, j] - v[j]
+
+    # Calculer les coûts réduits (Delta)
+    delta = np.full((num_rows, num_cols), np.inf)
+    for i in range(num_rows):
+        for j in range(num_cols):
+            if allocation[i, j] == 0:
+                delta[i, j] = couts[i, j] - (u[i] + v[j])
+
+    print("\nCoûts réduits (Delta) :")
+    print(delta)
+
+    # Si tous les Delta ≥ 0, la solution est optimale
+    if np.all(delta >= 0):
+        print("\nSolution optimale atteinte.")
+        return allocation
+
+    # Trouver la cellule à améliorer
+    i, j = np.unravel_index(np.argmin(delta), delta.shape)
+    print(f"\nAmélioration possible à la cellule ({i+1}, {j+1}) avec Delta = {delta[i, j]}")
+
+    # Ici, vous pouvez implémenter la logique pour ajuster l'allocation selon le chemin de Stepping Stone
+
+    return allocation
+
+# Metra Potential Method (MPM) Functions
+def generate_task_data():
+    """Generate or accept tasks and dependencies."""
+    use_default = messagebox.askyesno("Choix", "Do you want to use the default task table?")
+
+    if use_default:
+        # Default tasks table (task, predecessors, durations)
+        tasks = ['Debut', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'Fin']
+        predecessors = [[], ['Debut'], ['A'], ['B'], ['A'], ['A'], ['D'], ['C', 'E', 'F'], ['G']]
+        durations = [0, 8, 5, 2, 1, 3, 4, 2, 0]
+    else:
+        tasks = []
+        predecessors = []
+        durations = []
+
+        # Add the "Debut" task
+        tasks.append('Debut')
+        predecessors.append([])
+        durations.append(0)
+
+        n = simpledialog.askinteger("Input", "Enter the number of tasks (excluding 'Debut' and 'Fin'):")
+        for i in range(n):
+            name = simpledialog.askstring("Input", f"Enter the name of task {i + 1}:")
+            antecedents = simpledialog.askstring("Input", f"Enter the antecedents of task {name} (comma-separated, or 'none' if none):")
+            duration = simpledialog.askinteger("Input", f"Enter the duration of task {name}:")
+            tasks.append(name)
+            predecessors.append([] if antecedents.lower() == 'none' else antecedents.split(','))
+            durations.append(duration)
+
+        # Add the "Fin" task
+        tasks.append('Fin')
+        predecessors.append([])  # Will be handled automatically later
+        durations.append(0)
+
+        # Link "Debut" to all tasks with no predecessors
+        for i, preds in enumerate(predecessors):
+            if not preds and tasks[i] != 'Debut':  # Exclude "Debut" itself
+                predecessors[i] = ['Debut']
+
+        # Link "Fin" to all tasks with no successors
+        last_tasks = [tasks[i] for i in range(len(tasks)) if tasks[i] != 'Fin' and all(tasks[i] not in preds for preds in predecessors)]
+        predecessors[-1] = last_tasks
+
+    print("\nTasks and dependencies:")
+    for i, task in enumerate(tasks):
+        print(f"Task: {task}, Predecessors: {predecessors[i]}, Duration: {durations[i]}")
+
+    return tasks, predecessors, durations
+
+def calculate_potentials(tasks, predecessors, durations):
+    """Calculate the potentials for each task using MPM."""
+    potentials = {}
+    late_starts = {}
+    graph = nx.DiGraph()
+
+    # Add tasks to the graph
+    for i, task in enumerate(tasks):
+        graph.add_node(task, duration=durations[i])
+        for predecessor in predecessors[i]:
+            graph.add_edge(predecessor, task)
+
+    # Topological sorting
+    sorted_tasks = list(nx.topological_sort(graph))
+
+    # Calculate Early Start (potentials)
+    for task in sorted_tasks:
+        if not list(graph.predecessors(task)):
+            potentials[task] = 0
+        else:
+            potentials[task] = max(
+                potentials[predecessor] + graph.nodes[predecessor]['duration']
+                for predecessor in graph.predecessors(task)
+            )
+
+    # Calculate Late Start
+    late_starts['Fin'] = potentials['Fin']
+    for task in reversed(sorted_tasks):
+        if not list(graph.successors(task)):
+            late_starts[task] = potentials['Fin'] if task == 'Fin' else potentials[task]
+        else:
+            late_starts[task] = min(
+                late_starts[successor] - graph.nodes[task]['duration']
+                for successor in graph.successors(task)
+            )
+
+    return potentials, late_starts, graph
+
+def find_critical_path(tasks, potentials, late_starts):
+    """Find the critical path based on Early Start and Late Start."""
+    critical_path = [task for task in tasks if potentials[task] == late_starts[task]]
+    return critical_path
+
+def draw_graph(canvas_frame, tasks, predecessors, potentials, late_starts, graph, critical_path):
+    """Draw the task graph with potentials, late starts, and highlight critical path."""
+    pos = nx.spring_layout(graph)
+    labels = {task: f"{task}\n({potentials[task]}|{late_starts[task]})" for task in graph.nodes}
+
+    # Set node colors: green for "Debut", yellow for "Fin", red for critical path, blue otherwise
+    node_colors = []
+    for task in graph.nodes:
+        if task == 'Debut':
+            node_colors.append('green')
+        elif task == 'Fin':
+            node_colors.append('yellow')
+        elif task in critical_path:
+            node_colors.append('red')
+        else:
+            node_colors.append('skyblue')
+
+    fig, ax = plt.subplots(figsize=(12, 8))
+    nx.draw(graph, pos, with_labels=True, labels=labels, node_color=node_colors, node_size=2000, font_size=10, font_weight='bold', edge_color='gray')
+    durations = nx.get_node_attributes(graph, 'duration')
+    nx.draw_networkx_edge_labels(graph, pos, edge_labels={(u, v): durations[v] for u, v in graph.edges}, font_color='green')
+
+    canvas = FigureCanvasTkAgg(fig, master=canvas_frame)
+    canvas_widget = canvas.get_tk_widget()
+    canvas_widget.pack(fill=tk.BOTH, expand=True)
+    canvas.draw()
+    plt.close(fig)
+
+# MPM GUI Class
+class MPMGUI:
+    def __init__(self, root):
+        self.root = root
+        self.tasks = None
+        self.predecessors = None
+        self.durations = None
+
+        for widget in self.root.winfo_children():
+            widget.destroy()
+
+        self.create_base_layout()
+
+        tk.Label(root, text="Metra Potential Method (MPM)", font=("Poppins", 20, "bold"), pady=20).pack()
+
+        control_frame = tk.Frame(root, pady=10)
+        control_frame.pack(side=tk.LEFT, fill=tk.Y)
+
+        self.canvas_frame = tk.Frame(root)
+        self.canvas_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+
+        tk.Button(control_frame, text="Generate Task Data", command=self.generate_task_data).pack(pady=5)
+        tk.Button(control_frame, text="Calculate Potentials", command=self.calculate_potentials).pack(pady=5)
+        tk.Button(control_frame, text="Find Critical Path", command=self.find_critical_path).pack(pady=5)
+
+        self.result_text = tk.Text(control_frame, height=10, width=30)
+        self.result_text.pack(pady=5)
+
+        tk.Button(control_frame, text="Back to Main Menu", command=lambda: AlgorithmApp(self.root).main_menu()).pack(pady=10)
+
+    def create_base_layout(self):
+        # Create a frame for the name and logo
+        name_logo_frame = tk.Frame(self.root)
+        name_logo_frame.pack(side=tk.TOP, fill=tk.X)
+
+        # Add your name on the left
+        name_label = tk.Label(name_logo_frame, text="Elèves ingenieurs : \nYouness KOSSARA\nMohamed Anas RAFI\n\nEncadré par:\nDr.El MKHALET Mouna", font=("Poppins", 22, "bold"), padx=20)
+        name_label.pack(side=tk.LEFT, anchor=tk.W)
+
+        # Add a logo on the right (you can replace 'logo.png' with your actual logo file path)
+        logo_path = "/Users/anas/Documents/python_env/python_env/logo-emsi.png"  # Replace with the actual path to your logo
+        try:
+            logo_image = tk.PhotoImage(file=logo_path)
+            # Resize the image
+            logo_image = logo_image.subsample(2, 2)  # Adjust the subsample values to make the image smaller
+            logo_label = tk.Label(name_logo_frame, image=logo_image)
+            logo_label.image = logo_image  # Keep a reference to avoid garbage collection
+            logo_label.pack(side=tk.RIGHT, anchor=tk.E, padx=10, pady=10)
+        except tk.TclError:
+            print("Logo image not found.")
+
+        # Create a footer frame
+        footer_frame = tk.Frame(self.root, bg="gray", height=30)
+        footer_frame.pack(side=tk.BOTTOM, fill=tk.X)
+
+        # Add footer text
+        footer_label = tk.Label(footer_frame, text="© 2024 EMSI - all rights preserved", bg="gray", fg="white")
+        footer_label.pack(pady=5)
+
+    def generate_task_data(self):
+        self.tasks, self.predecessors, self.durations = generate_task_data()
+        self.result_text.delete(1.0, tk.END)
+        self.result_text.insert(tk.END, f"Task data generated:\nTasks: {self.tasks}\nPredecessors: {self.predecessors}\nDurations: {self.durations}\n")
+
+    def calculate_potentials(self):
+        if self.tasks is None or self.predecessors is None or self.durations is None:
+            messagebox.showerror("Error", "Please generate task data first.")
+            return
+
+        self.potentials, self.late_starts, self.graph = calculate_potentials(self.tasks, self.predecessors, self.durations)
+        self.result_text.delete(1.0, tk.END)
+        self.result_text.insert(tk.END, f"Calculated Potentials and Late Starts:\nPotentials: {self.potentials}\nLate Starts: {self.late_starts}\n")
+
+    def find_critical_path(self):
+        if self.potentials is None or self.late_starts is None or self.graph is None:
+            messagebox.showerror("Error", "Please calculate potentials first.")
+            return
+
+        self.critical_path = find_critical_path(self.tasks, self.potentials, self.late_starts)
+        self.result_text.delete(1.0, tk.END)
+        self.result_text.insert(tk.END, f"Critical Path: {' -> '.join(self.critical_path)}\n")
+        draw_graph(self.canvas_frame, self.tasks, self.predecessors, self.potentials, self.late_starts, self.graph, self.critical_path)
+
+# Main App
+class AlgorithmApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Project Recherche operationnelle")
+        self.home_page()
+
+    def home_page(self):
+        for widget in self.root.winfo_children():
+            widget.destroy()
+
+        self.create_base_layout()
+
+        # Create a frame for the home page
+        home_frame = tk.Frame(self.root, padx=20, pady=20)
+        home_frame.pack(expand=True, fill=tk.BOTH)
+
+        button_frame = tk.Frame(home_frame, pady=20)
+        button_frame.pack(expand=True, fill=tk.BOTH)
+
+        # Add a start button
+        start_button = tk.Button(button_frame, text="Start", font=("Poppins", 16), command=self.main_menu)
+        start_button.pack(side=tk.TOP, pady=10)
+
+        # Add a quit button
+        quit_button = tk.Button(button_frame, text="Quit", font=("Poppins", 16), command=self.root.quit)
+        quit_button.pack(side=tk.TOP, pady=10)
+
+    def create_base_layout(self):
+        # Create a frame for the name and logo
+        name_logo_frame = tk.Frame(self.root)
+        name_logo_frame.pack(side=tk.TOP, fill=tk.X)
+
+        # Add your name on the left
+        name_label = tk.Label(name_logo_frame, text="Elèves ingenieurs : \nYouness KOSSARA\nMohamed Anas RAFI\n\nEncadré par:\nDr.El MKHALET Mouna", font=("Poppins", 22, "bold"), padx=20)
+        name_label.pack(side=tk.LEFT, anchor=tk.W)
+
+        # Add a logo on the right (you can replace 'logo.png' with your actual logo file path)
+        logo_path = "/Users/anas/Documents/python_env/python_env/logo-emsi.png"  # Replace with the actual path to your logo
+        try:
+            logo_image = tk.PhotoImage(file=logo_path)
+            # Resize the image
+            logo_image = logo_image.subsample(2, 2)  # Adjust the subsample values to make the image smaller
+            logo_label = tk.Label(name_logo_frame, image=logo_image)
+            logo_label.image = logo_image  # Keep a reference to avoid garbage collection
+            logo_label.pack(side=tk.RIGHT, anchor=tk.E, padx=10, pady=10)
+        except tk.TclError:
+            print("Logo image not found.")
+
+        # Create a footer frame
+        footer_frame = tk.Frame(self.root, bg="gray", height=30)
+        footer_frame.pack(side=tk.BOTTOM, fill=tk.X)
+
+        # Add footer text
+        footer_label = tk.Label(footer_frame, text="© 2024 EMSI - all rights preserved", bg="gray", fg="white")
+        footer_label.pack(pady=5)
+
+    def main_menu(self):
+        for widget in self.root.winfo_children():
+            widget.destroy()
+
+        self.create_base_layout()
+
+        home_frame = tk.Frame(self.root, padx=20, pady=20)
+        home_frame.pack(expand=True, fill=tk.BOTH)
+
+        button_frame = tk.Frame(home_frame, pady=20)
+        button_frame.pack(expand=True, fill=tk.BOTH)
+
+        button_style = {"font": ("Poppins", 14), "width": 20, "pady": 10}
+        tk.Button(button_frame, text="Welsh-Powell", command=self.welsh_powell_gui, **button_style).pack(pady=10)
+        tk.Button(button_frame, text="Transportation Problem", command=self.transportation_problem_gui, **button_style).pack(pady=10)
+        tk.Button(button_frame, text="Dijkstra", command=self.dijkstra_gui, **button_style).pack(pady=10)
+        tk.Button(button_frame, text="Ford-Fulkerson", command=self.ford_fulkerson_gui, **button_style).pack(pady=10)
+        tk.Button(button_frame, text="Metra Potential Method (MPM)", command=self.mpm_gui, **button_style).pack(pady=10)
+        tk.Button(button_frame, text="Bellman-Ford", command=self.bellman_ford_gui, **button_style).pack(pady=10)
+        tk.Button(button_frame, text="Kruskal", command=self.kruskal_gui, **button_style).pack(pady=10)
+
+    def bellman_ford_gui(self):
+        AlgorithmGUI(self.root, "Bellman-Ford", create_random_graph_bellman, bellman_ford_shortest_path)
+
+    def dijkstra_gui(self):
+        AlgorithmGUI(self.root, "Dijkstra", create_random_graph_dijkstra, dijkstra_shortest_path)
+
+    def ford_fulkerson_gui(self):
+        FordFulkersonGUI(self.root)
+
+    def kruskal_gui(self):
+        KruskalGUI(self.root)
+
+    def welsh_powell_gui(self):
+        WelshPowellGUI(self.root)
+
+    def transportation_problem_gui(self):
+        TransportationProblemGUI(self.root)
+
+    def mpm_gui(self):
+        MPMGUI(self.root)
+
+# Generic Algorithm GUI
+class AlgorithmGUI:
+    def __init__(self, root, title, create_graph_fn, shortest_path_fn):
+        self.root = root
+        self.create_graph_fn = create_graph_fn
+        self.shortest_path_fn = shortest_path_fn
+        self.graph = None
+
+        for widget in self.root.winfo_children():
+            widget.destroy()
+
+        self.create_base_layout()
+
+        tk.Label(root, text=f"{title} Algorithm", font=("Poppins", 20, "bold"), pady=20).pack()
+
+        control_frame = tk.Frame(root, pady=10)
+        control_frame.pack(side=tk.LEFT, fill=tk.Y)
+
+        self.canvas_frame = tk.Frame(root)
+        self.canvas_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+
+        tk.Label(control_frame, text="Number of Nodes:").pack()
+        self.num_nodes_entry = tk.Entry(control_frame)
+        self.num_nodes_entry.pack()
+
+        self.start_node_var = tk.StringVar()
+        self.end_node_var = tk.StringVar()
+
+        tk.Button(control_frame, text="Create Random Graph", command=self.create_graph).pack(pady=5)
+        tk.Button(control_frame, text="Find Shortest Path", command=self.find_shortest_path).pack(pady=5)
+
+        tk.Label(control_frame, text="Start Node:").pack()
+        self.start_node_entry = ttk.Combobox(control_frame, textvariable=self.start_node_var)
+        self.start_node_entry.pack()
+
+        tk.Label(control_frame, text="End Node:").pack()
+        self.end_node_entry = ttk.Combobox(control_frame, textvariable=self.end_node_var)
+        self.end_node_entry.pack()
+
+        self.result_text = tk.Text(control_frame, height=10, width=60)
+        self.result_text.pack(pady=5)
+
+        tk.Button(control_frame, text="Back to Main Menu", command=lambda: AlgorithmApp(self.root).main_menu()).pack(pady=10)
+
+    def create_base_layout(self):
+        # Create a frame for the name and logo
+        name_logo_frame = tk.Frame(self.root)
+        name_logo_frame.pack(side=tk.TOP, fill=tk.X)
+
+        # Add your name on the left
+        name_label = tk.Label(name_logo_frame, text="Elèves ingenieurs : \nYouness KOSSARA\nMohamed Anas RAFI\n\nEncadré par:\nDr.El MKHALET Mouna", font=("Poppins", 22, "bold"), padx=20)
+        name_label.pack(side=tk.LEFT, anchor=tk.W)
+
+        # Add a logo on the right (you can replace 'logo.png' with your actual logo file path)
+        logo_path = "/Users/anas/Documents/python_env/python_env/logo-emsi.png"  # Replace with the actual path to your logo
+        try:
+            logo_image = tk.PhotoImage(file=logo_path)
+            # Resize the image
+            logo_image = logo_image.subsample(2, 2)  # Adjust the subsample values to make the image smaller
+            logo_label = tk.Label(name_logo_frame, image=logo_image)
+            logo_label.image = logo_image  # Keep a reference to avoid garbage collection
+            logo_label.pack(side=tk.RIGHT, anchor=tk.E, padx=10, pady=10)
+        except tk.TclError:
+            print("Logo image not found.")
+
+        # Create a footer frame
+        footer_frame = tk.Frame(self.root, bg="gray", height=30)
+        footer_frame.pack(side=tk.BOTTOM, fill=tk.X)
+
+        # Add footer text
+        footer_label = tk.Label(footer_frame, text="© 2024 EMSI - all rights preserved", bg="gray", fg="white")
+        footer_label.pack(pady=5)
+
+    def create_graph(self):
+        try:
+            num_nodes = int(self.num_nodes_entry.get())
+            self.graph = self.create_graph_fn(num_nodes)
+            nodes = list(self.graph.nodes)
+            self.start_node_entry['values'] = nodes
+            self.end_node_entry['values'] = nodes
+            self.result_text.delete(1.0, tk.END)
+            self.result_text.insert(tk.END, f"Graph with {num_nodes} nodes created.\nNodes: {nodes}")
+        except ValueError:
+            messagebox.showerror("Error", "Please enter a valid number of nodes.")
+
+    def find_shortest_path(self):
+        if not self.graph:
+            messagebox.showerror("Error", "No graph created.")
+            return
+
+        start_node = self.start_node_var.get()
+        end_node = self.end_node_var.get()
+
+        if not start_node or not end_node:
+            messagebox.showerror("Error", "Please select start and end nodes.")
+            return
+
+        if start_node not in self.graph.nodes or end_node not in self.graph.nodes:
+            messagebox.showerror("Error", "Invalid start or end node.")
+            return
+
+        path, path_length = self.shortest_path_fn(self.graph, start_node, end_node)
+
+        self.result_text.delete(1.0, tk.END)
+        if path:
+            self.result_text.insert(tk.END, f"Shortest path: {' -> '.join(path)}\n")
+            self.result_text.insert(tk.END, f"Path length: {path_length}\n")
+            display_graph(self.canvas_frame, self.graph, shortest_path=path)
+        else:
+            self.result_text.insert(tk.END, "No path found.\n")
+            display_graph(self.canvas_frame, self.graph)
+
+# Ford-Fulkerson GUI
+class FordFulkersonGUI:
+    def __init__(self, root):
+        self.root = root
+        self.graph = None
+
+        for widget in self.root.winfo_children():
+            widget.destroy()
+
+        self.create_base_layout()
+
+        tk.Label(root, text="Ford-Fulkerson Algorithm", font=("Poppins", 20, "bold"), pady=20).pack()
+
+        control_frame = tk.Frame(root, pady=10)
+        control_frame.pack(side=tk.LEFT, fill=tk.Y)
+
+        self.canvas_frame = tk.Frame(root)
+        self.canvas_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+
+        tk.Label(control_frame, text="Number of Nodes:").pack()
+        self.num_nodes_entry = tk.Entry(control_frame)
+        self.num_nodes_entry.pack()
+
+        tk.Button(control_frame, text="Create Random Graph", command=self.create_graph).pack(pady=5)
+        tk.Button(control_frame, text="Find Max Flow", command=self.find_max_flow).pack(pady=5)
+
+        self.result_text = tk.Text(control_frame, height=10, width=30)
+        self.result_text.pack(pady=5)
+
+        tk.Button(control_frame, text="Back to Main Menu", command=lambda: AlgorithmApp(self.root).main_menu()).pack(pady=10)
+
+    def create_base_layout(self):
+        # Create a frame for the name and logo
+        name_logo_frame = tk.Frame(self.root)
+        name_logo_frame.pack(side=tk.TOP, fill=tk.X)
+
+        # Add your name on the left
+        name_label = tk.Label(name_logo_frame, text="Elèves ingenieurs : \nYouness KOSSARA\nMohamed Anas RAFI\n\nEncadré par:\nDr.El MKHALET Mouna", font=("Poppins", 22, "bold"), padx=20)
+        name_label.pack(side=tk.LEFT, anchor=tk.W)
+
+        # Add a logo on the right (you can replace 'logo.png' with your actual logo file path)
+        logo_path = "/Users/anas/Documents/python_env/python_env/logo-emsi.png"  # Replace with the actual path to your logo
+        try:
+            logo_image = tk.PhotoImage(file=logo_path)
+            # Resize the image
+            logo_image = logo_image.subsample(2, 2)  # Adjust the subsample values to make the image smaller
+            logo_label = tk.Label(name_logo_frame, image=logo_image)
+            logo_label.image = logo_image  # Keep a reference to avoid garbage collection
+            logo_label.pack(side=tk.RIGHT, anchor=tk.E, padx=10, pady=10)
+        except tk.TclError:
+            print("Logo image not found.")
+
+        # Create a footer frame
+        footer_frame = tk.Frame(self.root, bg="gray", height=30)
+        footer_frame.pack(side=tk.BOTTOM, fill=tk.X)
+
+        # Add footer text
+        footer_label = tk.Label(footer_frame, text="© 2024 EMSI - all rights preserved", bg="gray", fg="white")
+        footer_label.pack(pady=5)
+
+    def create_graph(self):
+        try:
+            num_nodes = int(self.num_nodes_entry.get())
+            self.graph = create_random_graph_ford_fulkerson(num_nodes)
+            self.result_text.delete(1.0, tk.END)
+            self.result_text.insert(tk.END, f"Graph with {num_nodes} nodes created.")
+        except ValueError:
+            messagebox.showerror("Error", "Please enter a valid number of nodes.")
+
+    def find_max_flow(self):
+        if not self.graph:
+            messagebox.showerror("Error", "No graph created.")
+            return
+
+        source, target = 0, len(self.graph.nodes) - 1
+
+        flow_value, flow_dict, min_cut = ford_fulkerson(self.graph, source, target)
+
+        self.result_text.delete(1.0, tk.END)
+        self.result_text.insert(tk.END, f"Max flow from {source} to {target}: {flow_value}\n")
+        self.result_text.insert(tk.END, f"Min cut edges: {min_cut}\n")
+        display_graph(self.canvas_frame, self.graph, flow_dict=flow_dict, source=source, target=target, flow_value=flow_value, min_cut=min_cut)
+
+# Kruskal GUI
+class KruskalGUI:
+    def __init__(self, root):
+        self.root = root
+        self.graph = None
+
+        for widget in self.root.winfo_children():
+            widget.destroy()
+
+        self.create_base_layout()
+
+        tk.Label(root, text="Kruskal's Algorithm", font=("Poppins", 20, "bold"), pady=20).pack()
+
+        control_frame = tk.Frame(root, pady=10)
+        control_frame.pack(side=tk.LEFT, fill=tk.Y)
+
+        self.canvas_frame = tk.Frame(root)
+        self.canvas_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+
+        tk.Label(control_frame, text="Number of Nodes:").pack()
+        self.num_nodes_entry = tk.Entry(control_frame)
+        self.num_nodes_entry.pack()
+
+        tk.Button(control_frame, text="Create Random Graph", command=self.create_graph).pack(pady=5)
+        tk.Button(control_frame, text="Find MST", command=self.find_mst).pack(pady=5)
+
+        self.result_text = tk.Text(control_frame, height=10, width=30)
+        self.result_text.pack(pady=5)
+
+        tk.Button(control_frame, text="Back to Main Menu", command=lambda: AlgorithmApp(self.root).main_menu()).pack(pady=10)
+
+    def create_base_layout(self):
+        # Create a frame for the name and logo
+        name_logo_frame = tk.Frame(self.root)
+        name_logo_frame.pack(side=tk.TOP, fill=tk.X)
+
+        # Add your name on the left
+        name_label = tk.Label(name_logo_frame, text="Elèves ingenieurs : \nYouness KOSSARA\nMohamed Anas RAFI\n\nEncadré par:\nDr.El MKHALET Mouna", font=("Poppins", 22, "bold"), padx=20)
+        name_label.pack(side=tk.LEFT, anchor=tk.W)
+
+        # Add a logo on the right (you can replace 'logo.png' with your actual logo file path)
+        logo_path = "/Users/anas/Documents/python_env/python_env/logo-emsi.png"  # Replace with the actual path to your logo
+        try:
+            logo_image = tk.PhotoImage(file=logo_path)
+            # Resize the image
+            logo_image = logo_image.subsample(2, 2)  # Adjust the subsample values to make the image smaller
+            logo_label = tk.Label(name_logo_frame, image=logo_image)
+            logo_label.image = logo_image  # Keep a reference to avoid garbage collection
+            logo_label.pack(side=tk.RIGHT, anchor=tk.E, padx=10, pady=10)
+        except tk.TclError:
+            print("Logo image not found.")
+
+        # Create a footer frame
+        footer_frame = tk.Frame(self.root, bg="gray", height=30)
+        footer_frame.pack(side=tk.BOTTOM, fill=tk.X)
+
+        # Add footer text
+        footer_label = tk.Label(footer_frame, text="© 2024 EMSI - all rights preserved", bg="gray", fg="white")
+        footer_label.pack(pady=5)
+
+    def create_graph(self):
+        try:
+            num_nodes = int(self.num_nodes_entry.get())
+            self.graph = create_random_graph_kruskal(num_nodes)
+            self.result_text.delete(1.0, tk.END)
+            self.result_text.insert(tk.END, f"Graph with {num_nodes} nodes created.")
+        except ValueError:
+            messagebox.showerror("Error", "Please enter a valid number of nodes.")
+
+    def find_mst(self):
+        if not self.graph:
+            messagebox.showerror("Error", "No graph created.")
+            return
+
+        mst_edges = minimum_spanning_tree(self.graph)
+
+        self.result_text.delete(1.0, tk.END)
+        self.result_text.insert(tk.END, f"Minimum Spanning Tree edges: {mst_edges}\n")
+        display_graph(self.canvas_frame, self.graph, tree_edges=mst_edges)
+
+# Transportation Problem GUI
+class TransportationProblemGUI:
+    def __init__(self, root):
+        self.root = root
+        self.capacites = None
+        self.demandes = None
+        self.couts = None
+
+        for widget in self.root.winfo_children():
+            widget.destroy()
+
+        self.create_base_layout()
+
+        tk.Label(root, text="Transportation Problem", font=("Poppins", 20, "bold"), pady=20).pack()
+
+        control_frame = tk.Frame(root, pady=10)
+        control_frame.pack(side=tk.LEFT, fill=tk.Y)
+
+        self.canvas_frame = tk.Frame(root)
+        self.canvas_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+
+        tk.Button(control_frame, text="Initialize Data", command=self.initialize_data).pack(pady=5)
+        tk.Button(control_frame, text="Solve with Nord-Ouest", command=self.solve_nord_ouest).pack(pady=5)
+        tk.Button(control_frame, text="Solve with Moindre Coût", command=self.solve_moindre_cout).pack(pady=5)
+        tk.Button(control_frame, text="Optimize with Stepping Stone", command=self.optimize_stepping_stone).pack(pady=5)
+
+        self.result_text = tk.Text(control_frame, height=10, width=30)
+        self.result_text.pack(pady=5)
+
+        tk.Button(control_frame, text="Back to Main Menu", command=lambda: AlgorithmApp(self.root).main_menu()).pack(pady=10)
+
+    def create_base_layout(self):
+        # Create a frame for the name and logo
+        name_logo_frame = tk.Frame(self.root)
+        name_logo_frame.pack(side=tk.TOP, fill=tk.X)
+
+        # Add your name on the left
+        name_label = tk.Label(name_logo_frame, text="Elèves ingenieurs : \nYouness KOSSARA\nMohamed Anas RAFI\n\nEncadré par:\nDr.El MKHALET Mouna", font=("Poppins", 22, "bold"), padx=20)
+        name_label.pack(side=tk.LEFT, anchor=tk.W)
+
+        # Add a logo on the right (you can replace 'logo.png' with your actual logo file path)
+        logo_path = "/Users/anas/Documents/python_env/python_env/logo-emsi.png"  # Replace with the actual path to your logo
+        try:
+            logo_image = tk.PhotoImage(file=logo_path)
+            # Resize the image
+            logo_image = logo_image.subsample(2, 2)  # Adjust the subsample values to make the image smaller
+            logo_label = tk.Label(name_logo_frame, image=logo_image)
+            logo_label.image = logo_image  # Keep a reference to avoid garbage collection
+            logo_label.pack(side=tk.RIGHT, anchor=tk.E, padx=10, pady=10)
+        except tk.TclError:
+            print("Logo image not found.")
+
+        # Create a footer frame
+        footer_frame = tk.Frame(self.root, bg="gray", height=30)
+        footer_frame.pack(side=tk.BOTTOM, fill=tk.X)
+
+        # Add footer text
+        footer_label = tk.Label(footer_frame, text="© 2024 EMSI - all rights preserved", bg="gray", fg="white")
+        footer_label.pack(pady=5)
+
+    def initialize_data(self):
+        self.capacites, self.demandes, self.couts = init_transport()
+        self.result_text.delete(1.0, tk.END)
+        self.result_text.insert(tk.END, f"Data initialized:\nCapacités des usines: {self.capacites}\nDemandes des magasins: {self.demandes}\nCoûts unitaires: {self.couts}\n")
+
+    def solve_nord_ouest(self):
+        if self.capacites is None or self.demandes is None or self.couts is None:
+            messagebox.showerror("Error", "Please initialize data first.")
+            return
+
+        allocation_nw = nord_ouest(self.capacites.copy(), self.demandes.copy())
+        self.result_text.delete(1.0, tk.END)
+        self.result_text.insert(tk.END, f"Allocation (Nord-Ouest):\n{allocation_nw}\n")
+        display_transport_graph(self.canvas_frame, self.capacites, self.demandes, allocation_nw, self.couts)
+
+    def solve_moindre_cout(self):
+        if self.capacites is None or self.demandes is None or self.couts is None:
+            messagebox.showerror("Error", "Please initialize data first.")
+            return
+
+        allocation_mc = moindre_cout(self.capacites.copy(), self.demandes.copy(), self.couts)
+        self.result_text.delete(1.0, tk.END)
+        self.result_text.insert(tk.END, f"Allocation (Moindre Coût):\n{allocation_mc}\n")
+        display_transport_graph(self.canvas_frame, self.capacites, self.demandes, allocation_mc, self.couts)
+
+    def optimize_stepping_stone(self):
+        if self.capacites is None or self.demandes is None or self.couts is None:
+            messagebox.showerror("Error", "Please initialize data first.")
+            return
+
+        allocation_mc = moindre_cout(self.capacites.copy(), self.demandes.copy(), self.couts)
+        allocation_opt = stepping_stone(self.couts, allocation_mc)
+        self.result_text.delete(1.0, tk.END)
+        self.result_text.insert(tk.END, f"Allocation optimisée:\n{allocation_opt}\n")
+        display_transport_graph(self.canvas_frame, self.capacites, self.demandes, allocation_opt, self.couts)
+
+# Run the Application
+if __name__ == "__main__":
+
+    root = tk.Tk()
+    app = AlgorithmApp(root)
+    root.mainloop()
