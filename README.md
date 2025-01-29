@@ -1,7 +1,7 @@
 # Project_RO
 dans ce lien vous pouvez consulter l executable nommer "MohamedAnasRAFI_YounessKOSSARA_G4_Orangers" et le code sous forme d un fichier .txt "code.txt"
 
-Check out the latest release [here](https://github.com/AnasSP/Project_RO_MohamedAnasRAFI_YounessKOSSARA_G4_Orangers/releases/latest).
+Consulter lappliaction .exec [here](https://github.com/AnasSP/Project_RO_MohamedAnasRAFI_YounessKOSSARA_G4_Orangers/releases/latest).
 
 <img width="1512" alt="Screenshot 2025-01-29 at 16 34 18" src="https://github.com/user-attachments/assets/0185ac9f-7104-401c-8e2c-c4e244ad4a27" />
 
